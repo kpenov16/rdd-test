@@ -38,11 +38,37 @@
     (throw (NullPointerException. "The value passed to ActualField cannot be nil"))
     (->ActualField v)))
 
-
-
 (comment
   (def myActualField (new-ActualField 5))
   (match? myActualField 5))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; SequentialSpace impl;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defrecord SequentialSpace
+  [bound])
+
+(defn new-SequentialSpace
+  ([]
+   (new-SequentialSpace -1))
+  ([bound]
+   {:pre [(int? bound)]}
+   (->SequentialSpace (if (>= 0 bound) -1 bound))))
+
+(comment
+  (def mySec (new-SequentialSpace))
+  (:bound mySec)
+
+  (def mySec (new-SequentialSpace -5))
+  (:bound mySec)
+
+  (def mySec (new-SequentialSpace 6))
+  (:bound mySec))
+
+
+
 
 
 
