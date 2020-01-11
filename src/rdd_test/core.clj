@@ -5,7 +5,7 @@
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;; FormalField impl;;;;;
+;; FormalField impl ;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defrecord FormalField [v]
   TemplateField
@@ -24,7 +24,7 @@
   (match? myFormalField 5))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;; ActualField impl;;;;;
+;; ActualField impl ;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defrecord ActualField [v]
   TemplateField
@@ -43,19 +43,59 @@
   (match? myActualField 5))
 
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Tuple impl ;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+#_(defrecord Tuple [elements]
+
+    (length [this] (count (:elements this)))
+    (get-element-at [this i] ((:elements this) i)))
+
+#_(defn new-Tuple [elements]
+    (->Tuple elements))
+
+(comment)
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Space ;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defprotocol Space
+  (ssize [space])
+  (sput [space fields])
+  (sget [space templateFields])
+  (sgetp [space templateFields])
+  (sgetAll [space templateFields])
+  (squery [space templateFields])
+  (squeryp [space templateFields])
+  (squeryAll [space templateFields]))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; SequentialSpace impl;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defrecord SequentialSpace [bound tuples]
+  Space
+  (ssize [space] (count (:tuples space))))
 
-(defrecord SequentialSpace
-  [bound])
+
+(defn new-SequentialSpace-
+  ([bound tuples]
+   {:pre [(int? bound) (vector? tuples)]}
+   (->SequentialSpace (if (>= 0 bound) -1 bound) tuples)))
 
 (defn new-SequentialSpace
   ([]
    (new-SequentialSpace -1))
+
   ([bound]
    {:pre [(int? bound)]}
-   (->SequentialSpace (if (>= 0 bound) -1 bound))))
+   (new-SequentialSpace- (if (>= 0 bound) -1 bound) [])))
+
+
 
 (comment
   (def mySec (new-SequentialSpace))
