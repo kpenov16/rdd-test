@@ -65,7 +65,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defprotocol Space
   (ssize [space])
-  (sput [space fields])
+  (sputp [space fields])
   (sget [space templateFields])
   (sgetp [space templateFields])
   (sgetAll [space templateFields])
@@ -77,14 +77,25 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; SequentialSpace impl;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;(defn sputp- [space & fields] (-my-fn this args))
+
 (defrecord SequentialSpace [bound tuples]
   Space
-  (ssize [space] (count (:tuples space))))
+  (ssize [space]
+    (count (:tuples space)))
 
+  (sputp [space fields]
+    (locking space
+      (swap! (:tuples space)
+             (fn [old new]
+               (if (<= (:bound space) (count old))
+                 (conj old new)
+                 old))
+             fields))))
 
 (defn new-SequentialSpace-
   ([bound tuples]
-   {:pre [(int? bound) (vector? tuples)]}
+   {:pre [(int? bound) (vector? @tuples)]}
    (->SequentialSpace (if (>= 0 bound) -1 bound) tuples)))
 
 (defn new-SequentialSpace
@@ -93,11 +104,14 @@
 
   ([bound]
    {:pre [(int? bound)]}
-   (new-SequentialSpace- (if (>= 0 bound) -1 bound) [])))
+   (new-SequentialSpace- (if (>= 0 bound) -1 bound) (atom []))))
 
 
 
 (comment
+  (swap! mySec (fn [old new] (new-SequentialSpace- -1 [new])) [1 2])
+  (ssize @mySec)
+
   (def mySec (new-SequentialSpace))
   (:bound mySec)
 
