@@ -86,12 +86,22 @@
 
   (sputp [space fields]
     (locking space
-      (swap! (:tuples space)
-             (fn [old new]
-               (if (<= (:bound space) (count old))
-                 (conj old new)
-                 old))
-             fields))))
+      (dosync
+        (let [tOld  @(:tuples space)
+              tNew (alter (:tuples space)
+                          (fn [old new]
+                            (if (<= (:bound space) (count old))
+                              (conj old new)
+                              old))
+                          fields)]
+          (if (= tNew (conj tOld fields))
+            (do
+              (println tNew (conj tOld fields))
+              true)
+            (do
+              (println tNew (conj tOld fields))
+              false)))))))
+
 
 (defn new-SequentialSpace-
   ([bound tuples]
@@ -104,7 +114,7 @@
 
   ([bound]
    {:pre [(int? bound)]}
-   (new-SequentialSpace- (if (>= 0 bound) -1 bound) (atom []))))
+   (new-SequentialSpace- (if (>= 0 bound) -1 bound) (ref []))))
 
 
 
