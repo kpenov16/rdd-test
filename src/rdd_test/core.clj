@@ -65,7 +65,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defprotocol Space
   (ssize [space])
-  (sputp [space fields])
+  (sput [space fields])
   (sget [space templateFields])
   (sgetp [space templateFields])
   (sgetAll [space templateFields])
@@ -84,24 +84,17 @@
   (ssize [space]
     (count (:tuples space)))
 
-  (sputp [space fields]
+  (sput [space fields]
     (locking space
       (dosync
         (let [tOld  @(:tuples space)
               tNew (alter (:tuples space)
                           (fn [old new]
-                            (if (<= (:bound space) (count old))
-                              (conj old new)
-                              old))
+                            (if (and (> (:bound space) 0) (>= (count old) (:bound space)))
+                              old
+                              (conj old new)))
                           fields)]
-          (if (= tNew (conj tOld fields))
-            (do
-              (println tNew (conj tOld fields))
-              true)
-            (do
-              (println tNew (conj tOld fields))
-              false)))))))
-
+          (= tNew (conj tOld fields)))))))
 
 (defn new-SequentialSpace-
   ([bound tuples]
