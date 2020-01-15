@@ -1,8 +1,8 @@
-(ns rdd-test.core)
+(ns rdd-test.core
+  (:require [clojure.core.async :as async]))
 
 (defprotocol TemplateField
   (match? [field o]))
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; FormalField impl ;;;;;;;
@@ -22,6 +22,35 @@
 (comment
   (def myFormalField (new-FormalField 5))
   (match? myFormalField 5))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Template impl ;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defprotocol ITemplate
+  (match-it [thisTemplate otherTemplate]))
+
+(defrecord Template [templateFields]
+  ITemplate
+  (match-it [thisTemplate otherTemplate]
+    (if (= (count (:templateFields thisTemplate)) (count (:templateFields otherTemplate)))
+      (not (some false? (map #(match? %1 (:v %2) ) (:templateFields thisTemplate) (:templateFields otherTemplate))))
+      false)))
+
+(defn new-Template [& args]
+  (if (nil? args)
+    (throw (NullPointerException. "The value passed to Template cannot be nil"))
+    (let [fields (if (vector? args) args (vec args))]
+      (->Template
+        (into [] (for [f fields]
+                   (if (satisfies? TemplateField f) f (new-ActualField f))))))))
+
+
+(comment
+  (def myTemplate (new-Template 2 5))
+  (def myTemplate (new-Template 5))
+  (def myTemplate (new-Template (new-FormalField 5) (new-FormalField "hi"))))
+
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; ActualField impl ;;;;;;;
@@ -58,15 +87,13 @@
 
 (comment)
 
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Space ;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defprotocol Space
   (ssize [space])
-  (sput [space fields])
-  (sget [space templateFields])
+  (put! [space fields])
+  (get! [space templateFields])
   (sgetp [space templateFields])
   (sgetAll [space templateFields])
   (squery [space templateFields])
@@ -78,13 +105,28 @@
 ;;; SequentialSpace impl;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;(defn sputp- [space & fields] (-my-fn this args))
+#_(def my-chan (async/chan 1))
 
-(defrecord SequentialSpace [bound tuples]
+;;trying to put more than one on the queue will block
+;;until the queue is empty
+(defn match-tupl? [col1 col2]
+  (if (= (count col1) (count col2))
+     (not (some false? (map #(match? %1 %2) col1 col2)))
+    false))
+
+(defn match-tupl2? [col1 col2]
+  (if (= (count col1) (count col2))
+    (not (some false? (map #(match? %1 (:v %2) ) col1 col2)))
+    false))
+
+
+
+(defrecord SequentialSpace [bound tuples put-chan get-chan]
   Space
   (ssize [space]
     (count (:tuples space)))
 
-  (sput [space fields]
+  (put! [space fields]
     (locking space
       (dosync
         (let [tOld  @(:tuples space)
@@ -94,12 +136,32 @@
                               old
                               (conj old new)))
                           fields)]
-          (= tNew (conj tOld fields)))))))
+          (if (= tNew (conj tOld fields))
+            (do
+              (put! put-chan "new-tuple-event")
+              true)
+            false)))))
+
+  (get! [space templateFields]
+    (locking space
+      (dosync
+        (alter (:tuples space) (fn [tuples templ-fields]
+                                 (for [fields tuples]
+                                   (for [field fields
+                                         to-find-field templ-fields]
+                                     (if (match? to-find-field field)
+                                       true
+                                       false))) templateFields))))))
+
+
 
 (defn new-SequentialSpace-
   ([bound tuples]
    {:pre [(int? bound) (vector? @tuples)]}
-   (->SequentialSpace (if (>= 0 bound) -1 bound) tuples)))
+   (let [b (if (>= 0 bound) -1 bound)
+         put-chan-size (if (= b -1) 1 b)
+         get-chan-size (if (= b -1) 1 b)]
+     (->SequentialSpace b tuples (async/chan put-chan-size) (async/chan get-chan-size)))))
 
 (defn new-SequentialSpace
   ([]
