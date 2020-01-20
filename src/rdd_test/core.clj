@@ -126,40 +126,71 @@
   (put! mySpace1 (new-Template "hi" 2)))
 
 
-(defrecord SequentialSpace [bound tuples ret-tupl get!-lock put!-lock put-chan mult-put-chan get-chan mult-get-chan]
+(defrecord SequentialSpace [bound tuples ret-tupl put-tupl get!-lock put!-lock put-chan mult-put-chan get-chan mult-get-chan]
   Space
   (ssize [space]
     (count (:tuples space)))
 
   (put! [space fields]
     (locking (:put!-lock space)
-      (dosync
-        (apply (fn [s f]
-                 (let [tOld @(:tuples s)
-                       tNew (alter (:tuples s)
-                                   (fn [old new]
-                                     (if (and (> (:bound s) 0) (>= (count old) (:bound s)))
-                                       old
-                                       (do
-                                         (println old new)
-                                         (conj old new))))
-                                   f)]
-                   (do
-                     (if (not (= tOld tNew))
+      (do
+        (println "put!: locked")
+        (let [ps! (fn [fs] (dosync
+                             (alter (:tuples space)
+                                    (fn [old new]
+                                      (let [b (:bound space)
+                                            over-bound (and (> b 0) (>= (count old) b))]
+                                        (if (true? over-bound)
+                                          (do
+                                            (println "put!: tuples not changed")
+                                            (ref-set (:put-tupl space) -1)
+                                            old)
+                                          (do
+                                            (println "put!: tuples changed" old new)
+                                            (ref-set (:put-tupl space) new)
+                                            (conj old new)))))
+                                    fs)))]
+          (do
+            (println "put!: (ps! fields):" fields)
+            (ps! fields)
+            (while (and (= -1 (deref (:put-tupl space))) (number? (deref (:put-tupl space))))
+              (let [tap-get-chan (async/chan (chan-size? (:bound space)))
+                    t- (async/tap (:mult-get-chan space) tap-get-chan)]
+                (do
+                  (println "put!: tapping from get chan")
+                  (println "put!: chan val:" (async/<!! tap-get-chan))
+                  (println "put!: calling recur with " (:tuples space) fields)
+                  (ps! fields))))
+            (async/>!! put-chan "put-tuple-event")
+            true))
+
+        #_(dosync
+            (apply (fn [s f]
+                     (let [tOld @(:tuples s)
+                           tNew (alter (:tuples s)
+                                       (fn [old new]
+                                         (if (and (> (:bound s) 0) (>= (count old) (:bound s)))
+                                           old
+                                           (do
+                                             (println old new)
+                                             (conj old new))))
+                                       f)]
                        (do
-                         (async/>!! put-chan "put-tuple-event")
-                         true)
-                       (let [tap-get-chan (async/chan (chan-size? bound))
-                             t- (async/tap (:mult-get-chan space) tap-get-chan)]
-                         (do
-                           (async/<!! tap-get-chan)
-                           (recur @(:tuples s) f)))))))
-               [space fields]))))
+                         (if (not (= tOld tNew))
+                           (do
+                             (async/>!! put-chan "put-tuple-event")
+                             true)
+                           (let [tap-get-chan (async/chan (chan-size? (:bound space)))
+                                 t- (async/tap (:mult-get-chan space) tap-get-chan)]
+                             (do
+                               (async/<!! tap-get-chan)
+                               (recur @(:tuples s) f)))))))
+                   [space fields])))))
 
   (get! [space templateFields]
     (locking (:get!-lock space)
       (do
-        (println "locked")
+        (println "get!: locked")
         (let [ds! (fn [tfs]
                     (dosync
                       (alter (:tuples space)
@@ -172,30 +203,114 @@
                                    (let [pos (.indexOf for_loop true)]
                                      (if (> pos -1)
                                          (do
-                                           (println "getting")
-                                           (async/>!! (:get-chan space) "get-tuple-event")
+                                           (println "get!: getting")
                                            (ref-set (:ret-tupl space) (tuples pos))
                                            (vec (concat (subvec tuples 0 pos) (subvec tuples (inc pos)))))
                                          (do
-                                           (println "setting -1")
+                                           (println "get!: setting -1")
                                            (ref-set (:ret-tupl space) -1)
                                            tuples))))))
                              tfs)))]
           (do
+            (println "before ex:" templateFields)
             (ds! templateFields)
-            (while (= -1 (deref (:ret-tupl space)))
+            (while (and (= -1 (deref (:ret-tupl space))) (number? (deref (:ret-tupl space))))
               (let [tap-put-chan (async/chan (chan-size? (:bound space)))
                     t- (async/tap (:mult-put-chan space) tap-put-chan)]
                 (do
-                  (println "tapping from put chan")
-                  (println "chan val:" (async/<!! tap-put-chan))
-                  (println "calling recur with " (:tuples space) templateFields)
+                  (println "get!: tapping from put chan")
+                  (println "get!: chan val:" (async/<!! tap-put-chan))
+                  (println "get!: calling recur with " (:tuples space) templateFields)
                   (ds! templateFields))))
+            (async/>!! (:get-chan space) "get-tuple-event")
             (deref (:ret-tupl space))))))))
 
 
 
 (comment
+  (def put-func
+    (fn []
+      (do
+        (let [t1 (Thread. (fn [] (do
+                                   (println "pt1")
+                                   (try
+                                     (put! mySpace1 (new-Template "hi" 2))
+                                     (catch Throwable t (println "t1 ex: " (.toString t)))))))
+              t2 (Thread. (fn [] (do
+                                   (println "pt2")
+                                   (try
+                                     (put! mySpace1 (new-Template "hi" 2))
+                                     (catch Throwable t (println "t2 ex: " (.toString t)))))))
+              t3 (Thread. (fn [] (do
+                                   (println "pt3")
+                                   (try
+                                     (put! mySpace1 (new-Template "hi" 2))
+                                     (catch Throwable t (println "t3 ex: " (.toString t)))))))
+              t4 (Thread. (fn [] (do
+                                   (println "pt4")
+                                   (try
+                                     (put! mySpace1 (new-Template "hi" 2))
+                                     (catch Throwable t (println "t4 ex: " (.toString t)))))))
+              t5 (Thread. (fn [] (do
+                                   (println "pt5")
+                                   (try
+                                     (put! mySpace1 (new-Template "hi" 2))
+                                     (catch Throwable t (println "t5 ex: " (.toString t)))))))
+              t6 (Thread. (fn [] (do
+                                   (println "pt6")
+                                   (try
+                                     (put! mySpace1 (new-Template "hi" 2))
+                                     (catch Throwable t (println "t6 ex: " (.toString t)))))))]
+          (.start t1)
+          (.start t2)
+          (.start t3)
+          (.start t4)
+          (.start t5)
+          (.start t6)))))
+
+  (def get-func
+    (fn []
+      (do
+        (let
+          [t1 (Thread. (fn [] (do
+                                (println "pt1")
+                                (try
+                                  (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField 2)))
+                                  (catch Throwable t (println "t1 ex: " (.toString t)))))))
+           t2 (Thread. (fn [] (do
+                                (println "pt2")
+                                (try
+                                  (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField 2)))
+                                  (catch Throwable t (println "t2 ex: " (.toString t)))))))
+           t3 (Thread. (fn [] (do
+                                (println "pt3")
+                                (try
+                                  (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField 2)))
+                                  (catch Throwable t (println "t3 ex: " (.toString t)))))))
+           t4 (Thread. (fn [] (do
+                                (println "pt4")
+                                (try
+                                  (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField 2)))
+                                  (catch Throwable t (println "t4 ex: " (.toString t)))))))
+           t5 (Thread. (fn [] (do
+                                (println "pt5")
+                                (try
+                                  (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField 2)))
+                                  (catch Throwable t (println "t5 ex: " (.toString t)))))))
+           t6 (Thread. (fn [] (do
+                                (println "pt6")
+                                (try
+                                  (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField 2)))
+                                  (catch Throwable t (println "t6 ex: " (.toString t)))))))]
+
+          (.start t1)
+          (.start t2)
+          (.start t3)
+          (.start t4)
+          (.start t5)
+          (.start t6)))))
+
+
   (def mySpace1 (new-SequentialSpace 2))
   (def gf (fn []
             (do (let [t1 (Thread. (fn [] (do (println "t1")
@@ -235,13 +350,38 @@
   (def mySpace1 (new-SequentialSpace 2))
   (put! mySpace1 (new-Template 1 2))
   (put! mySpace1 (new-Template "hi" 2))
-  (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField 2))))
+  (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField 2)))
+  #_(put! [space fields]
+          (locking (:put!-lock space)
+            (dosync
+              (apply (fn [s f]
+                       (let [tOld @(:tuples s)
+                             tNew (alter (:tuples s)
+                                         (fn [old new]
+                                           (if (and (> (:bound s) 0) (>= (count old) (:bound s)))
+                                             old
+                                             (do
+                                               (println old new)
+                                               (conj old new))))
+                                         f)]
+                         (do
+                           (if (not (= tOld tNew))
+                             (do
+                               (async/>!! put-chan "put-tuple-event")
+                               true)
+                             (let [tap-get-chan (async/chan (chan-size? bound))
+                                   t- (async/tap (:mult-get-chan space) tap-get-chan)]
+                               (do
+                                 (async/<!! tap-get-chan)
+                                 (recur @(:tuples s) f)))))))
+                     [space fields])))))
 
 
 (defn new-SequentialSpace-
   ([bound tuples]
    {:pre [(int? bound) (vector? @tuples)]}
    (let [ret-tupl (ref nil)
+         put-tupl (ref nil)
          get!-lock (Object.)
          put!-lock (Object.)
          b (if (>= 0 bound) -1 bound)
@@ -251,7 +391,7 @@
          get-chan-size put-chan-size
          get-chan (async/chan get-chan-size)
          mult-get-chan (async/mult get-chan)]
-     (->SequentialSpace b tuples ret-tupl get!-lock put!-lock put-chan mult-put-chan get-chan mult-get-chan))))
+     (->SequentialSpace b tuples ret-tupl put-tupl get!-lock put!-lock put-chan mult-put-chan get-chan mult-get-chan))))
 
 (defn new-SequentialSpace
   ([]
