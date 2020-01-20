@@ -154,59 +154,84 @@
                          (do
                            (async/<!! tap-get-chan)
                            (recur @(:tuples s) f)))))))
-               [space fields])
-
-
-        #_(do
-            (async/>!! (:put-chan space) "new-tuple-event")
-            (println "el in buff" (.count (.buf put-chan)))
-            (println "size of buff" (.n (.buf put-chan)))
-            true))))
-
+               [space fields]))))
 
   (get! [space templateFields]
     (locking (:get!-lock space)
-      (let [ds! (fn [tfs]
-                  (dosync
-                    (alter (:tuples space)
-                           (fn [tuples templ-fields]
-                             (let [;;tap-put-chan (async/chan (chan-size? (:bound space)))
-                                   ;;t- (async/tap (:mult-put-chan space) tap-put-chan)
-                                   for_loop (for [t tuples]
-                                              (do
-                                                (println t templ-fields)
-                                                (match-it t templ-fields)))]
-                               (do
-                                 #_(println (doall for_loop))
-                                 (let [pos (.indexOf for_loop true)]
-                                   (if (> pos -1)
-                                       (do
-                                         (async/>!! (:get-chan space) "get-tuple-event")
-                                         (ref-set (:ret-tupl space) (tuples pos))
-                                         (vec (concat (subvec tuples 0 pos) (subvec tuples (inc pos)))))
-                                       (do
-                                         (ref-set (:ret-tupl space) -1)
-                                         tuples))))))
-                           tfs)))]
-        (do
-          (ds! templateFields)
-          (while (= -1 (deref (:ret-tupl space)))
-            (do
+      (do
+        (println "locked")
+        (let [ds! (fn [tfs]
+                    (dosync
+                      (alter (:tuples space)
+                             (fn [tuples templ-fields]
+                               (let [for_loop (for [t tuples]
+                                                (do
+                                                  (println t templ-fields)
+                                                  (match-it t templ-fields)))]
+                                 (do
+                                   (let [pos (.indexOf for_loop true)]
+                                     (if (> pos -1)
+                                         (do
+                                           (println "getting")
+                                           (async/>!! (:get-chan space) "get-tuple-event")
+                                           (ref-set (:ret-tupl space) (tuples pos))
+                                           (vec (concat (subvec tuples 0 pos) (subvec tuples (inc pos)))))
+                                         (do
+                                           (println "setting -1")
+                                           (ref-set (:ret-tupl space) -1)
+                                           tuples))))))
+                             tfs)))]
+          (do
+            (ds! templateFields)
+            (while (= -1 (deref (:ret-tupl space)))
               (let [tap-put-chan (async/chan (chan-size? (:bound space)))
                     t- (async/tap (:mult-put-chan space) tap-put-chan)]
                 (do
                   (println "tapping from put chan")
                   (println "chan val:" (async/<!! tap-put-chan))
                   (println "calling recur with " (:tuples space) templateFields)
-                  (ds! templateFields)
-                  #_(recur (:tuples space) templ-fields)))))
-          (deref (:ret-tupl space)))))))
-
-
+                  (ds! templateFields))))
+            (deref (:ret-tupl space))))))))
 
 
 
 (comment
+  (def mySpace1 (new-SequentialSpace 2))
+  (def gf (fn []
+            (do (let [t1 (Thread. (fn [] (do (println "t1")
+                                           (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField 2))))))
+                      t2 (Thread. (fn [] (do (println "t2")
+                                           (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField 2))))))
+                      t3 (Thread. (fn [] (do (println "t3")
+                                           (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField 2))))))
+                      t4 (Thread. (fn [] (do (println "t4")
+                                           (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField 2))))))
+                      t5 (Thread. (fn [] (do (println "t5")
+                                           (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField 2))))))
+                      t6 (Thread. (fn [] (do (println "t6")
+                                           (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField 2))))))]
+                  (.start t1) (.start t2) (.start t3)
+                  (.start t4) (.start t5) (.start t6)))))
+
+  (def pf (fn []
+            (do (let [t1 (Thread. (fn [] (do (println "pt1")
+                                           (put! mySpace1 (new-Template "hi" 2)))))
+                      t2 (Thread. (fn [] (do (println "pt2")
+                                           (put! mySpace1 (new-Template "hi" 2)))))
+                      t3 (Thread. (fn [] (do (println "pt3")
+                                           (put! mySpace1 (new-Template "hi" 2)))))
+                      t4 (Thread. (fn [] (do (println "t4")
+                                           (put! mySpace1 (new-Template "hi" 2)))))
+                      t5 (Thread. (fn [] (do (println "t5")
+                                           (put! mySpace1 (new-Template "hi" 2)))))
+                      t6 (Thread. (fn [] (do (println "t6")
+                                           (put! mySpace1 (new-Template "hi" 2)))))]
+                  (.start t1) (.start t2) (.start t3)
+                  (.start t4) (.start t5) (.start t6)))))
+
+  (gf)
+  (pf)
+
   (def mySpace1 (new-SequentialSpace 2))
   (put! mySpace1 (new-Template 1 2))
   (put! mySpace1 (new-Template "hi" 2))
