@@ -214,30 +214,36 @@
 (def put-func
   (fn []
     (dotimes [x 5]
-      ;;(.start
-        ;;(Thread.
-          ;;(future ;;(fn []
-            (async/go        (do
-                               (Thread/sleep (rand-int 10000))
-                               (println (str "put-t:" x))
-                               (try
-                                 (put! mySpace1 (new-Template "hi" x))
-                                 (catch Throwable t (println (str "t:" x "exception:" (.toString t))))
-                                 (finally (println (str "put t:" x "done")))))))))
+      (.start
+        (Thread.
+          ;;(future
+          (fn []
+            ;;(async/go
+              (do
+                (Thread/sleep (rand-int 10000))
+                (println (str "put-t:" x))
+                (try
+                  (println (str "put-t:" x "returned:")
+                           (put! mySpace1 (new-Template "hi" x)))
+                  (catch Throwable t (println (str "t:" x "exception:" (.toString t))))
+                  (finally (println (str "put t:" x "done")))))))))))
 
 (def get-func
   (fn []
     (dotimes [x 5]
-      ;;(.start
-        ;;(Thread.
-          ;;(future ;;(fn []
-            (async/go        (do
-                               (Thread/sleep (rand-int 10000))
-                               (println (str "get-t:" x))
-                               (try
-                                 (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField x)))
-                                 (catch Throwable t (println (str "t:" x "exception:" (.toString t))))
-                                 (finally (println (str "get t:" x "done")))))))))
+      (.start
+        (Thread.
+          ;;(future
+          (fn []
+            (async/go
+              (do
+                (Thread/sleep (rand-int 10000))
+                (println (str "get-t:" x))
+                (try
+                  (println (str "get-t:" x "returned:")
+                           (:templateFields (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField x)))))
+                  (catch Throwable t (println (str "t:" x "exception:" (.toString t))))
+                  (finally (println (str "get t:" x "done"))))))))))))
 
 
 
