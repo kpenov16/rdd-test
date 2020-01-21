@@ -92,7 +92,7 @@
   (put! [space fields])
   (get! [space templateFields])
   (getp! [space templateFields])
-  (sgetAll [space templateFields])
+  (getAll! [space templateFields])
   (squery [space templateFields])
   (squeryp [space templateFields])
   (squeryAll [space templateFields]))
@@ -163,7 +163,28 @@
              (do
               (.notifyAll (:tuples!-lock space))
               (:return x))
-             nil))))))
+             nil)))))
+
+  (getAll! [space template]
+    (locking (:tuples!-lock space)
+      (let [try-get! (fn [space template]
+                       (swap! (:tuples space)
+                              (fn [tuples template]
+                                (let [vals-indexed (map-indexed vector (:value tuples))
+                                      all-matched (map second (filter #(match-it (second %) template) vals-indexed))
+                                      all-not-matched (map second (filter #(not (match-it (second %) template)) vals-indexed))]
+                                  (if (not (empty? all-matched))
+                                    {:value (vec all-not-matched)
+                                     :return (vec all-matched)}
+                                    {:value (:value tuples)
+                                     :return false})))
+                              template))]
+        (let [x (try-get! space template)]
+          (if (:return x)
+            (do
+             (.notifyAll (:tuples!-lock space))
+             (:return x))
+            nil))))))
 
 (defn new-SequentialSpace-
   ([bound tuples]
@@ -181,7 +202,7 @@
    (new-SequentialSpace- (if (>= 0 bound) -1 bound) (atom {:value []
                                                            :return nil}))))
 
-(def mySpace1 (new-SequentialSpace 1))
+(def mySpace1 (new-SequentialSpace 10))
 
 (def put-func
   (fn []
@@ -214,6 +235,41 @@
                 (try
                   (println (str "get-t:" x "returned:")
                            (:templateFields (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField x)))))
+                  (catch Throwable t (println (str "t:" x "exception:" (.toString t))))
+                  (finally (println (str "get t:" x "done"))))))))))))
+
+(def putDuplicates-func
+  (fn []
+    (dotimes [n 3]
+      (dotimes [x 5]
+        (.start
+          (Thread.
+            ;;(future
+            (fn []
+              ;;(async/go
+              (do
+                (Thread/sleep (rand-int 10000))
+                (println (str "put-t:" n x))
+                (try
+                  (println (str "put-t:" n x "returned:")
+                           (put! mySpace1 (new-Template "hi" x)))
+                  (catch Throwable t (println (str "t:" n x "exception:" (.toString t))))
+                  (finally (println (str "put t:" n x "done"))))))))))))
+
+(def getAll-func
+  (fn []
+    (dotimes [x 5]
+      (.start
+        (Thread.
+          ;;(future
+          (fn []
+            (async/go
+              (do
+                (Thread/sleep (rand-int 10000))
+                (println (str "get-t:" x))
+                (try
+                  (println (str "get-t:" x "returned:")
+                           (get! mySpace1 (new-Template (new-ActualField "hi") (new-ActualField x))))
                   (catch Throwable t (println (str "t:" x "exception:" (.toString t))))
                   (finally (println (str "get t:" x "done"))))))))))))
 
