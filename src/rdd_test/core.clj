@@ -134,18 +134,18 @@
 
 (def x nil)
 
-(defrecord SequentialSpace [bound tuples get!-lock put!-lock]
+(defrecord SequentialSpace [bound tuples tuples!-lock]
   Space
   (ssize [space]
     (count (:value (:tuples space))))
 
   (put! [space fields]
-    (locking (:put!-lock space)
+    (locking (:tuples!-lock space)
      (do
        (while (true? (let [b (:bound space)
                            over-bound (and (> b 0) (>= (count (:value @(:tuples space))) b))]
                        over-bound))
-         (.wait (:put!-lock space)))
+         (.wait (:tuples!-lock space)))
        (swap! (:tuples space)
               (fn [old new]
                 (if (and (> (:bound space) 0) (>= (count (:value old)) (:bound space)))
@@ -153,11 +153,11 @@
                     {:value (conj (:value old) new)
                      :return (:return old)}))
               fields)
-       (.notifyAll (:put!-lock space))
+       (.notifyAll (:tuples!-lock space))
        true)))
 
   (get! [space template]
-    (locking (:get!-lock space)
+    (locking (:tuples!-lock space)
      (let [try-get! (fn [space template]
                       (swap! (:tuples space)
                              (fn [tuples template]
@@ -174,10 +174,10 @@
          (loop [x (try-get! space template)]
            (if (:return x)
                (do
-                 (.notifyAll (:get!-lock space))
+                 (.notifyAll (:tuples!-lock space))
                  (:return x))
                (do
-                 (.wait (:get!-lock space))
+                 (.wait (:tuples!-lock space))
                  (recur (try-get! space template)))))
 
 
@@ -195,10 +195,9 @@
 (defn new-SequentialSpace-
   ([bound tuples]
    {:pre [(int? bound) (vector? (:value @tuples))]}
-   (let [get!-lock (Object.)
-         put!-lock (Object.)
+   (let [tuples!-lock (Object.)
          b (if (>= 0 bound) -1 bound)]
-     (->SequentialSpace b tuples get!-lock put!-lock))))
+     (->SequentialSpace b tuples tuples!-lock))))
 
 (defn new-SequentialSpace
   ([]
