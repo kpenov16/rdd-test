@@ -91,7 +91,7 @@
   (ssize [space])
   (put! [space fields])
   (get! [space templateFields])
-  (sgetp [space templateFields])
+  (getp! [space templateFields])
   (sgetAll [space templateFields])
   (squery [space templateFields])
   (squeryp [space templateFields])
@@ -131,8 +131,6 @@
      ~@body
      (when ~test
        (recur))))
-
-(def x nil)
 
 (defrecord SequentialSpace [bound tuples tuples!-lock]
   Space
@@ -178,17 +176,27 @@
                  (:return x))
                (do
                  (.wait (:tuples!-lock space))
-                 (recur (try-get! space template)))))
+                 (recur (try-get! space template)))))))))
 
-
-         #_(loop []
-             (.wait (:get!-lock space))
-             (when (not (:return (try-get! space template)))
-               (recur)))
-
-         #_(while (not (:return (try-get! space template)))
-             (.wait (:get!-lock space)))
-         #_(.notifyAll (:get!-lock space)))))))
+  (getp! [space template]
+    (locking (:tuples!-lock space)
+      (let [try-get! (fn [space template]
+                       (swap! (:tuples space)
+                              (fn [tuples template]
+                                (let [for_loop (for [t (:value tuples)] (match-it t template))
+                                      pos (.indexOf for_loop true)]
+                                  (if (> pos -1)
+                                    {:value (vec (concat (subvec (:value tuples) 0 pos) (subvec (:value tuples) (inc pos))))
+                                     :return ((:value tuples) pos)}
+                                    {:value (:value tuples)
+                                     :return false})))
+                              template))]
+        (let [x (try-get! space template)]
+          (if (:return x)
+             (do
+              (.notifyAll (:tuples!-lock space))
+              (:return x))
+             nil))))))
 
 (comment)
 
