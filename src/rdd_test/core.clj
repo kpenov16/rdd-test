@@ -125,101 +125,80 @@
   ;;block after second put!
   (put! mySpace1 (new-Template "hi" 2)))
 
+(defmacro do-while
+  [test & body]
+  `(loop []
+     ~@body
+     (when ~test
+       (recur))))
 
-(defrecord SequentialSpace [bound tuples ret-tupl put-tupl get!-lock put!-lock put-chan mult-put-chan get-chan mult-get-chan]
+(def x nil)
+
+(defrecord SequentialSpace [bound tuples get!-lock put!-lock]
   Space
   (ssize [space]
-    (count (:tuples space)))
+    (count (:value (:tuples space))))
 
   (put! [space fields]
-    ;;(dosync
     (locking (:put!-lock space)
      (do
-       (println "put!: locked")
-       (let [ps! (fn [fs] (dosync
-                            (alter (:tuples space)
-                                   (fn [old new]
-                                     (let [b (:bound space)
-                                           over-bound (and (> b 0) (>= (count old) b))]
-                                       (if (true? over-bound)
-                                         (do
-                                           (println "put!: tuples not changed")
-                                           (ref-set (:put-tupl space) -1)
-                                           old)
-                                         (do
-                                           (println "put!: tuples changed" old new)
-                                           (ref-set (:put-tupl space) new)
-                                           (conj old new)))))
-                                   fs)))]
-         (do
-           (println "put!: (ps! fields):" fields)
-           (ps! fields)
-           (while (and (= -1 (deref (:put-tupl space))) (number? (deref (:put-tupl space))))
-             (let [tap-get-chan (async/chan (chan-size? (:bound space)))
-                   t- (async/tap (:mult-get-chan space) tap-get-chan)]
-               (do
-                 (println "put!: tapping from get chan")
-                 (println "put!: chan val:" (async/<!! tap-get-chan))
-                 (println "put!: calling recur with " (:tuples space) fields)
-                 (ps! fields))))
-           (async/>!! put-chan "put-tuple-event")
-           true)))))
+       (while (true? (let [b (:bound space)
+                           over-bound (and (> b 0) (>= (count (:value @(:tuples space))) b))]
+                       over-bound))
+         (.wait (:put!-lock space)))
+       (swap! (:tuples space)
+              (fn [old new]
+                (if (and (> (:bound space) 0) (>= (count (:value old)) (:bound space)))
+                    old
+                    {:value (conj (:value old) new)
+                     :return (:return old)}))
+              fields)
+       (.notifyAll (:put!-lock space))
+       true)))
 
-  (get! [space templateFields]
-    ;;(dosync
+  (get! [space template]
     (locking (:get!-lock space)
-     (do
-       (println "get!: locked by Thread:" (.getId (Thread/currentThread)))
-       (let [ds! (fn [tfs]
-                   (dosync
-                     (alter (:tuples space)
-                            (fn [tuples templ-fields]
-                              (let [for_loop (for [t tuples]
-                                               (do
-                                                 (println t templ-fields)
-                                                 (match-it t templ-fields)))]
-                                (do
-                                  (let [pos (.indexOf for_loop true)]
-                                    (if (> pos -1)
-                                        (do
-                                          (println "get!: getting")
-                                          (ref-set (:ret-tupl space) (tuples pos))
-                                          (vec (concat (subvec tuples 0 pos) (subvec tuples (inc pos)))))
-                                        (do
-                                          (println "get!: setting -1")
-                                          (ref-set (:ret-tupl space) -1)
-                                          tuples))))))
-                            tfs)))]
-         (do
-           (println "before ex:" templateFields)
-           (ds! templateFields)
-           (while (and (= -1 (deref (:ret-tupl space))) (number? (deref (:ret-tupl space))))
-             (let [tap-put-chan (async/chan (chan-size? (:bound space)))
-                   t- (async/tap (:mult-put-chan space) tap-put-chan)]
+     (let [try-get! (fn [space template]
+                      (swap! (:tuples space)
+                             (fn [tuples template]
+                               (let [for_loop (for [t (:value tuples)] (match-it t template))
+                                     pos (.indexOf for_loop true)]
+                                 (if (> pos -1)
+                                   {:value (vec (concat (subvec (:value tuples) 0 pos) (subvec (:value tuples) (inc pos))))
+                                    :return ((:value tuples) pos)}
+                                   {:value (:value tuples)
+                                    :return false})))
+                             template))]
+       (do
+
+         (loop [x (try-get! space template)]
+           (if (:return x)
                (do
-                 (println "get!: tapping from put chan")
-                 (println "get!: chan val:" (async/<!! tap-put-chan))
-                 (println "get!: calling recur with " (:tuples space) templateFields)
-                 (ds! templateFields))))
-           (async/>!! (:get-chan space) "get-tuple-event")
-           (deref (:ret-tupl space))))))))
+                 (.notifyAll (:get!-lock space))
+                 (:return x))
+               (do
+                 (.wait (:get!-lock space))
+                 (recur (try-get! space template)))))
+
+
+         #_(loop []
+             (.wait (:get!-lock space))
+             (when (not (:return (try-get! space template)))
+               (recur)))
+
+         #_(while (not (:return (try-get! space template)))
+             (.wait (:get!-lock space)))
+         #_(.notifyAll (:get!-lock space)))))))
+
 (comment)
 
 (defn new-SequentialSpace-
   ([bound tuples]
-   {:pre [(int? bound) (vector? @tuples)]}
-   (let [ret-tupl (ref nil)
-         put-tupl (ref nil)
-         get!-lock (Object.)
+   {:pre [(int? bound) (vector? (:value @tuples))]}
+   (let [get!-lock (Object.)
          put!-lock (Object.)
-         b (if (>= 0 bound) -1 bound)
-         put-chan-size (chan-size? b)
-         put-chan (async/chan put-chan-size)
-         mult-put-chan (async/mult put-chan)
-         get-chan-size put-chan-size
-         get-chan (async/chan get-chan-size)
-         mult-get-chan (async/mult get-chan)]
-     (->SequentialSpace b tuples ret-tupl put-tupl get!-lock put!-lock put-chan mult-put-chan get-chan mult-get-chan))))
+         b (if (>= 0 bound) -1 bound)]
+     (->SequentialSpace b tuples get!-lock put!-lock))))
 
 (defn new-SequentialSpace
   ([]
@@ -227,7 +206,8 @@
 
   ([bound]
    {:pre [(int? bound)]}
-   (new-SequentialSpace- (if (>= 0 bound) -1 bound) (ref []))))
+   (new-SequentialSpace- (if (>= 0 bound) -1 bound) (atom {:value []
+                                                           :return nil}))))
 
 
 (def mySpace1 (new-SequentialSpace 1))
