@@ -93,9 +93,10 @@
   (get! [space templateFields])
   (getp! [space templateFields])
   (getAll! [space templateFields])
-  (squery [space templateFields])
-  (squeryp [space templateFields])
-  (squeryAll [space templateFields]))
+  (query [space templateFields])
+  (query-try! [space templateFields])
+  (queryp [space templateFields])
+  (queryAll [space templateFields]))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -165,6 +166,73 @@
               (:return x))
              nil)))))
 
+  (query-try! [space template]
+    (locking (:tuples!-lock space)
+      (let [try-get! (fn [space template]
+                       (swap! (:tuples space)
+                              (fn [tuples template]
+                                (let [for_loop (for [t (:value tuples)] (match-it t template))
+                                      pos (.indexOf for_loop true)]
+                                  (if (> pos -1)
+                                    {:value (:value tuples)
+                                     :return ((:value tuples) pos)}
+                                    {:value (:value tuples)
+                                     :return false})))
+                              template))]
+        (loop [x (try-get! space template)]
+          (if (:return x)
+             (:return x)
+             (do
+              (.wait (:tuples!-lock space))
+              (recur (try-get! space template))))))))
+
+  (query [space template]
+    (locking (:tuples!-lock space)
+      (let [try-get! (fn [tuples template]
+                       (let [for_loop (for [t (:value tuples)] (match-it t template))
+                             pos (.indexOf for_loop true)]
+                         (if (> pos -1)
+                           {:value "don't care"
+                            :return ((:value tuples) pos)}
+                           {:value "don't care"
+                            :return false})))]
+        (loop [x (try-get! @(:tuples space) template)]
+          (if (:return x)
+            (:return x)
+            (do
+             (.wait (:tuples!-lock space))
+             (recur (try-get! @(:tuples space) template))))))))
+
+  (queryp [space template]
+    (locking (:tuples!-lock space)
+      (let [try-get! (fn [tuples template]
+                       (let [for_loop (for [t (:value tuples)] (match-it t template))
+                             pos (.indexOf for_loop true)]
+                         (if (> pos -1)
+                           {:value "don't care"
+                            :return ((:value tuples) pos)}
+                           {:value "don't care"
+                            :return false})))]
+        (loop [x (try-get! @(:tuples space) template)]
+          (if (:return x)
+            (:return x)
+            nil)))))
+
+  (queryAll [space template]
+    (locking (:tuples!-lock space)
+      (let [try-get! (fn [tuples template]
+                       (let [vals-indexed (map-indexed vector (:value tuples))
+                             all-matched (map second (filter #(match-it (second %) template) vals-indexed))]
+                         (if (not (empty? all-matched))
+                           {:value "don't care"
+                            :return (vec all-matched)}
+                           {:value "don't care"
+                            :return false})))]
+        (let [x (try-get! @(:tuples space) template)]
+          (if (:return x)
+            (:return x)
+            nil)))))
+
   (getAll! [space template]
     (locking (:tuples!-lock space)
       (let [try-get! (fn [space template]
@@ -202,7 +270,7 @@
    (new-SequentialSpace- (if (>= 0 bound) -1 bound) (atom {:value []
                                                            :return nil}))))
 
-(def mySpace1 (new-SequentialSpace 10))
+(def mySpace1 (new-SequentialSpace 5))
 
 (def put-func
   (fn []
