@@ -368,43 +368,46 @@
         (do
           (while (not (queryp stop-signal-space (new-Template (new-ActualField "stop"))))
             (do
+              (println "Worker at the box warming up")
               (Thread/sleep (rand-int 10000))
-              (println "Worker at the box")
               (try
-                (println (str "put to part1-space"))
+                (println "Worker at the box putting to part1-space")
                 (put! part1-space (new-Template "part1"))
-                (println (str "put to part2-space 1"))
+                (println "Worker at the box putting to part2-space 1")
                 (put! part2-space (new-Template "part2"))
-                (println (str "put to part2-space 2"))
+                (println "Worker at the box putting to part2-space 2")
                 (put! part2-space (new-Template "part2"))
                 (catch Throwable t (println (str "Worker at the box exception:" (.toString t))))
-                (finally (println (str "put to part1-space and part2-space done"))))))
+                (finally (println "put to part1-space and part2-space done")))))
           (println "Worker at the box got a stop signal"))))))
 
-(defn product-worker []
-  (.start
-   (Thread.
-    (fn []
-      (do
-        (while (not (queryp stop-signal-space (new-Template (new-ActualField "stop"))))
-          (do
-            (Thread/sleep (rand-int 10000))
-            (println "Make product worker")
-            (try
-              (println (str "get from to part1-space"))
-              (get! part1-space (new-Template (new-ActualField "part1")))
-              (println (str "get from to part2-space 1"))
-              (get! part2-space (new-Template (new-ActualField "part2")))
-              (println (str "working on part1 and part1of2"))
-              (Thread/sleep 500)
-              (println (str "get from to part2-space 2"))
-              (get! part2-space (new-Template (new-ActualField "part2")))
-              (println (str "working on part1 and part2of2"))
-              (Thread/sleep 500)
-              (put! end-product-space (new-Template "product"))
-              (catch Throwable t (println (str "Make product worker exception:" (.toString t))))
-              (finally (println (str "put to end-product-space done"))))))
-        (println "Worker making products got a stop signal"))))))
+(defn product-worker [num-workers]
+  (dotimes [x num-workers]
+    (Thread/sleep (rand-int 1000))
+    (.start
+     (Thread.
+      (fn []
+        (do
+          (while (not (queryp stop-signal-space (new-Template (new-ActualField "stop"))))
+            (do
+              (println (str "Make product worker:" x " is warming up"))
+              (Thread/sleep (rand-int 10000))
+              (try
+                (println (str "Make product worker:" x " is getting from to part1-space"))
+                (get! part1-space (new-Template (new-ActualField "part1")))
+                (println "Make product worker:" x " is getting from to part2-space 1")
+                (get! part2-space (new-Template (new-ActualField "part2")))
+                (println (str "Make product worker:" x " working on part1 and part1of2"))
+                (Thread/sleep 500)
+                (println (str "Make product worker:" x " is getting from to part2-space 2"))
+                (get! part2-space (new-Template (new-ActualField "part2")))
+                (println (str "Make product worker:" x " is working on part1 and part2of2"))
+                (Thread/sleep 500)
+                (println (str "Make product worker:" x " is putting product to end-product-space"))
+                (put! end-product-space (new-Template "product"))
+                (catch Throwable t (println (str "Make product worker:" x " exception:" (.toString t))))
+                (finally (println (str "Make product worker:" x " put to end-product-space done"))))))
+          (println (str "Make product worker:" x " got a stop signal"))))))))
 
 
 (defn packing-worker []
@@ -414,88 +417,20 @@
       (let [number-of-packs-in-order 3
             _ (getp! stop-signal-space (new-Template (new-ActualField "stop")))]
         (do
+          (println "End product worker is warming up")
+          (Thread/sleep (rand-int 10000))
           (dotimes [n (inc number-of-packs-in-order)]
             (do
-              (Thread/sleep (rand-int 10000))
-              (println "End product worker")
               (try
-                (println (str "get from to end-product-space"))
+                (println "End product worker getting from to end-product-space")
                 (get! end-product-space (new-Template (new-ActualField "product")))
-                (println (str "packing end product"))
+                (println (str "End product worker is packing end product n:" (inc n)))
                 (Thread/sleep 300)
                 (when (= n number-of-packs-in-order)
-                  (put! stop-signal-space (new-Template "stop")))
+                  (do (println "End product worker is sending stop signal")
+                      (put! stop-signal-space (new-Template "stop"))))
                 (catch Throwable t (println (str "End product worker exception:" (.toString t))))
-                (finally (println (str "packing of end product is done"))))))))))))
-
-(comment
-
-  (def part1-space (new-SequentialSpace 1))
-  (def part2-space (new-SequentialSpace 2))
-  (def end-product-space (new-SequentialSpace 1))
-
-  (.start
-    (Thread.
-      (fn []
-        (let [work? true]
-          (while (work?)
-            (do
-              (Thread/sleep (rand-int 10000))
-              (println "Worker at the box")
-              (try
-                  (println (str "put to part1-space"))
-                  (put! part1-space (new-Template "part1"))
-                  (println (str "put to part2-space 1"))
-                  (put! part2-space (new-Template "part2"))
-                  (println (str "put to part2-space 2"))
-                  (put! part2-space (new-Template "part2"))
-                (catch Throwable t (println (str "Worker at the box exception:" (.toString t))))
-                (finally (println (str "put to part1-space and part2-space done"))))))))))
-
-  (.start
-    (Thread.
-      (fn []
-        (let [work? true]
-          (while (work?)
-            (do
-              (Thread/sleep (rand-int 10000))
-              (println "Make product worker")
-              (try
-                  (println (str "get from to part1-space"))
-                  (get! part1-space (new-Template (new-ActualField "part1")))
-                  (println (str "get from to part2-space 1"))
-                  (get! part2-space (new-Template (new-ActualField "part2")))
-                  (println (str "working on part1 and part1of2"))
-                  (Thread/sleep 500)
-                  (println (str "get from to part2-space 2"))
-                  (get! part2-space (new-Template (new-ActualField "part2")))
-                  (println (str "working on part1 and part2of2"))
-                  (Thread/sleep 500)
-                  (put! end-product-space (new-Template "product"))
-                (catch Throwable t (println (str "Make product worker exception:" (.toString t))))
-                (finally (println (str "put to end-product-space done"))))))))))
-
-  (.start
-   (Thread.
-     (fn []
-       (let [work? true]
-         (while (work?)
-           (do
-             (Thread/sleep (rand-int 10000))
-             (println "End product worker")
-             (try
-               (println (str "get from to end-product-space"))
-               (get! end-product-space (new-Template (new-ActualField "product")))
-               (println (str "packing end product"))
-               (Thread/sleep 300)
-               (catch Throwable t (println (str "End product worker exception:" (.toString t))))
-               (finally (println (str "packing of end product is done")))))))))))
-
-
-
-
-
-
+                (finally (println "packing of end product is done")))))))))))
 
 
 (comment
